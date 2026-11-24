@@ -29,7 +29,8 @@ export interface DashboardStats {
   language_distribution: Record<string, number>
 }
 
-const BASE = "/api/transcriptions"
+const API_HOST = import.meta.env.VITE_BACKEND_URL || ""
+const BASE = `${API_HOST}/api/transcriptions`
 
 async function request<T>(url: string, opts?: RequestInit): Promise<T> {
   const res = await fetch(url, { headers: { "Content-Type": "application/json" }, ...opts })
@@ -56,5 +57,5 @@ export const api = {
 
   getDashboardStats: () => request<DashboardStats>(`${BASE}/stats/dashboard`),
 
-  getHealth: () => request<{ status: string; model: Record<string, unknown> }>("/api/health"),
+  getHealth: () => request<{ status: string; model: Record<string, unknown> }>(`${API_HOST}/api/health`),
 }

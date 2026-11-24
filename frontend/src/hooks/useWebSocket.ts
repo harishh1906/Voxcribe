@@ -10,8 +10,18 @@ export function useWebSocket() {
   const connect = useCallback(() => {
     if (wsRef.current?.readyState === WebSocket.OPEN) return
     setStatus("connecting")
-    const proto = window.location.protocol === "https:" ? "wss:" : "ws:"
-    const ws = new WebSocket(`${proto}//${window.location.host}/ws/transcribe`)
+    const backendUrl = import.meta.env.VITE_BACKEND_URL
+    let wsUrl: string
+    if (backendUrl) {
+      const cleanUrl = backendUrl.replace(/\/$/, "")
+      const wsProto = cleanUrl.startsWith("https") ? "wss:" : "ws:"
+      const host = cleanUrl.replace(/^https?:\/\//, "")
+      wsUrl = `${wsProto}//${host}/ws/transcribe`
+    } else {
+      const proto = window.location.protocol === "https:" ? "wss:" : "ws:"
+      wsUrl = `${proto}//${window.location.host}/ws/transcribe`
+    }
+    const ws = new WebSocket(wsUrl)
 
     ws.onopen = () => setStatus("connected")
     ws.onmessage = (e) => {
