@@ -100,8 +100,14 @@ async def websocket_transcribe(ws: WebSocket):
                 await _send_json(ws, {"type": "recording_started", "data": {}})
 
             elif msg_type == "audio_chunk":
-                if not recording or paused:
+                if paused:
                     continue
+                if not recording:
+                    recording = True
+                    start_time = time.time()
+                    last_transcribed_time = time.time()
+                    logger.info("Auto-started recording on audio_chunk")
+
                 audio_b64 = msg.get("data", {}).get("audio", "")
                 if not audio_b64:
                     continue

@@ -40,9 +40,13 @@ export function useAudioRecorder(onChunk: (base64: string) => void) {
       const recorder = new MediaRecorder(stream, { mimeType: "audio/webm;codecs=opus" })
       recorder.ondataavailable = async (e) => {
         if (e.data.size > 0) {
-          const buf = await e.data.arrayBuffer()
-          const b64 = btoa(String.fromCharCode(...new Uint8Array(buf)))
-          onChunk(b64)
+          const reader = new FileReader()
+          reader.onloadend = () => {
+            const result = reader.result as string
+            const b64 = result.split(",")[1]
+            if (b64) onChunk(b64)
+          }
+          reader.readAsDataURL(e.data)
         }
       }
       recorder.start(1000) // chunk every 1 second
