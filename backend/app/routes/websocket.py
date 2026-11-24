@@ -29,10 +29,8 @@ async def websocket_transcribe(ws: WebSocket):
     logger.info("WebSocket client connected")
 
     # Per-connection session state
-    webm_buffer = bytearray()          # full WebM for final transcription
+    webm_buffer = bytearray()
     raw_pcm_buffer = bytearray()
-    chunk_webm_buffer = bytearray()    # only new audio since last transcription
-    text_segments: list[str] = []      # accumulated text segments
     recording = False
     paused = False
     start_time = 0.0
@@ -40,36 +38,22 @@ async def websocket_transcribe(ws: WebSocket):
     last_transcribed_time = 0.0
     latest_text = ""
     is_transcribing = False
-    chunk_counter = 0
 
     speech_svc = SpeechRecognitionService.get_instance()
 
-    # Maximum chunk window in seconds to transcribe at a time (keep it small for speed)
-    MAX_CHUNK_SECONDS = 3
-
-    async def transcribe_current_chunk():
-        """Transcribe only the latest ~5s chunk, not the full buffer."""
-        nonlocal latest_text, detected_lang, is_transcribing, last_transcribed_time, chunk_counter
+    async def transcribe_current_buffer():
+        nonlocal latest_text, detected_lang, is_transcribing, last_transcribed_time
         if is_transcribing:
             return
         is_transcribing = True
         try:
             pcm_audio = None
-            if len(chunk_webm_buffer) > 500:
-                # Convert only the new chunk to PCM
-                # We need the WebM header from the full buffer + the new data
+            if len(webm_buffer) > 1000:
                 pcm_audio = await asyncio.to_thread(
                     AudioProcessor.webm_to_pcm_float32, bytes(webm_buffer), settings.AUDIO_SAMPLE_RATE
                 )
-                # Only take the last MAX_CHUNK_SECONDS of audio
-                max_samples = int(MAX_CHUNK_SECONDS * settings.AUDIO_SAMPLE_RATE)
-                if pcm_audio is not None and len(pcm_audio) > max_samples:
-                    pcm_audio = pcm_audio[-max_samples:]
             elif len(raw_pcm_buffer) > 3200:
                 pcm_audio = AudioProcessor.pcm16_to_float32(bytes(raw_pcm_buffer))
-                max_samples = int(MAX_CHUNK_SECONDS * settings.AUDIO_SAMPLE_RATE)
-                if len(pcm_audio) > max_samples:
-                    pcm_audio = pcm_audio[-max_samples:]
 
             if pcm_audio is not None and len(pcm_audio) >= settings.AUDIO_SAMPLE_RATE:
                 result = await speech_svc.transcribe(pcm_audio, settings.AUDIO_SAMPLE_RATE)
@@ -78,17 +62,7 @@ async def websocket_transcribe(ws: WebSocket):
                 if lang:
                     detected_lang = lang
                 if text:
-                    chunk_counter += 1
-                    # Build running text: previous segments + current chunk
-                    if chunk_counter <= 1:
-                        latest_text = text
-                    else:
-                        # Replace the last chunk's text with new one
-                        if len(text_segments) > 0:
-                            text_segments[-1] = text
-                        else:
-                            text_segments.append(text)
-                        latest_text = " ".join(text_segments)
+                    latest_text = text
                     await _send_json(ws, {
                         "type": "partial_transcription",
                         "data": {
@@ -97,19 +71,9 @@ async def websocket_transcribe(ws: WebSocket):
                             "is_final": False,
                         },
                     })
-
-            # After transcribing, start a new segment every ~10 seconds
-            elapsed = time.time() - start_time
-            if chunk_counter > 0 and elapsed > len(text_segments) * 10 + 10:
-                if latest_text:
-                    # Lock in the current segment and start fresh
-                    if len(text_segments) == 0 or text_segments[-1] != latest_text.split(" ")[-1]:
-                        text_segments.append("")
-                chunk_webm_buffer.clear()
-
             last_transcribed_time = time.time()
         except Exception as e:
-            logger.error("Error in transcribe_current_chunk: %s", e)
+            logger.error("Error in transcribe_current_buffer: %s", e)
         finally:
             is_transcribing = False
 
@@ -129,11 +93,8 @@ async def websocket_transcribe(ws: WebSocket):
                 paused = False
                 webm_buffer.clear()
                 raw_pcm_buffer.clear()
-                chunk_webm_buffer.clear()
-                text_segments.clear()
                 latest_text = ""
                 detected_lang = ""
-                chunk_counter = 0
                 start_time = time.time()
                 last_transcribed_time = time.time()
                 await _send_json(ws, {"type": "recording_started", "data": {}})
@@ -152,14 +113,13 @@ async def websocket_transcribe(ws: WebSocket):
                 fmt = AudioProcessor.detect_format(chunk_raw)
                 if fmt == "webm" or len(webm_buffer) > 0:
                     webm_buffer.extend(chunk_raw)
-                    chunk_webm_buffer.extend(chunk_raw)
                 else:
                     raw_pcm_buffer.extend(chunk_raw)
 
                 # Incremental transcription: process every ~2.5 seconds
                 now = time.time()
                 if now - last_transcribed_time >= 2.5 and not is_transcribing:
-                    asyncio.create_task(transcribe_current_chunk())
+                    asyncio.create_task(transcribe_current_buffer())
 
             elif msg_type == "stop_recording":
                 recording = False

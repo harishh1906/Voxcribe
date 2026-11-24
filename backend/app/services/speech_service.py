@@ -137,13 +137,15 @@ class SpeechRecognitionService:
             return {"text": "", "language": None, "segments": [], "error": str(e)}
 
     def _transcribe_sync(self, audio: np.ndarray, sample_rate: int) -> Dict[str, Any]:
-        # Silence / noise gate — raised threshold to prevent hallucinations
         if len(audio) == 0:
             return {"text": "", "language": None, "language_probability": 0.0, "segments": []}
 
         rms = float(np.sqrt(np.mean(audio ** 2)))
-        if rms < 0.01:
-            logger.debug("Audio below silence threshold (rms=%.5f), skipping", rms)
+        logger.info("Transcribe called: samples=%d (%.2fs), rms=%.5f", len(audio), len(audio) / sample_rate, rms)
+
+        # 0.0015 threshold allows normal spoken volume while gating absolute silence
+        if rms < 0.0015:
+            logger.info("Audio below silence threshold (rms=%.5f < 0.0015), skipping", rms)
             return {"text": "", "language": None, "language_probability": 0.0, "segments": []}
 
         try:
@@ -154,39 +156,29 @@ class SpeechRecognitionService:
                 beam_size=_settings.WHISPER_BEAM_SIZE,
                 language=None,  # auto-detect (Hindi, English, Hinglish)
                 vad_filter=False,  # disabled to prevent empty-sequence crash
-                condition_on_previous_text=False,  # prevents hallucination loops
-                temperature=0.0,  # deterministic, no sampling overhead
-                no_speech_threshold=0.6,  # suppress output when no-speech probability > 60%
-                log_prob_threshold=-1.0,  # skip segments with very low confidence
-                compression_ratio_threshold=2.4,  # skip highly repetitive/compressed segments
-                suppress_blank=True,  # suppress blank outputs at start of sampling
+                condition_on_previous_text=False,
+                temperature=0.0,
             )
 
             text_parts = []
             seg_list = []
             for seg in segments_iter:
                 seg_text = seg.text.strip()
-                # Skip individual segments that are hallucinations
                 if _is_hallucination(seg_text):
-                    logger.debug("Skipping hallucinated segment: '%s'", seg_text)
-                    continue
-                if _is_repetitive(seg_text):
-                    logger.debug("Skipping repetitive segment: '%s'", seg_text)
                     continue
                 text_parts.append(seg.text)
                 seg_list.append({"start": seg.start, "end": seg.end, "text": seg.text})
 
             full_text = "".join(text_parts).strip()
-
-            # Final full-text hallucination check
             full_text = _clean_text(full_text)
-            if _is_hallucination(full_text) or _is_repetitive(full_text):
-                logger.debug("Full text failed hallucination check: '%s'", full_text)
+            if _is_hallucination(full_text):
                 full_text = ""
 
             lang = getattr(info, "language", None)
             prob = getattr(info, "language_probability", 0.0)
             lang_prob = round(prob, 2) if prob is not None else 0.0
+
+            logger.info("Transcription result: text='%s', lang=%s (%.2f)", full_text, lang, lang_prob)
 
             return {
                 "text": full_text,
