@@ -37,12 +37,14 @@ async def websocket_transcribe(ws: WebSocket):
     detected_lang = ""
     last_transcribed_time = 0.0
     latest_text = ""
+    committed_text = ""
+    last_committed_sample = 0
     is_transcribing = False
 
     speech_svc = SpeechRecognitionService.get_instance()
 
     async def transcribe_current_buffer():
-        nonlocal latest_text, detected_lang, is_transcribing, last_transcribed_time
+        nonlocal latest_text, committed_text, last_committed_sample, detected_lang, is_transcribing, last_transcribed_time
         if is_transcribing:
             return
         is_transcribing = True
@@ -56,21 +58,50 @@ async def websocket_transcribe(ws: WebSocket):
                 pcm_audio = AudioProcessor.pcm16_to_float32(bytes(raw_pcm_buffer))
 
             if pcm_audio is not None and len(pcm_audio) >= settings.AUDIO_SAMPLE_RATE:
-                result = await speech_svc.transcribe(pcm_audio, settings.AUDIO_SAMPLE_RATE)
-                text = result.get("text", "").strip()
-                lang = result.get("language")
-                if lang:
-                    detected_lang = lang
-                if text:
-                    latest_text = text
-                    await _send_json(ws, {
-                        "type": "partial_transcription",
-                        "data": {
-                            "text": latest_text,
-                            "language": detected_lang,
-                            "is_final": False,
-                        },
-                    })
+                # Transcribe only the uncommitted recent audio window for sub-second latency
+                recent_pcm = pcm_audio[last_committed_sample:]
+                if len(recent_pcm) >= settings.AUDIO_SAMPLE_RATE:
+                    result = await speech_svc.transcribe(recent_pcm, settings.AUDIO_SAMPLE_RATE)
+                    lang = result.get("language")
+                    if lang:
+                        detected_lang = lang
+
+                    segments = result.get("segments", [])
+                    recent_duration = len(recent_pcm) / settings.AUDIO_SAMPLE_RATE
+
+                    new_committed = []
+                    uncommitted = []
+                    advance_samples = 0
+
+                    for seg in segments:
+                        seg_text = seg.get("text", "").strip()
+                        if not seg_text:
+                            continue
+                        # If a segment ended > 2.0s ago, consider it committed
+                        if recent_duration - seg.get("end", 0.0) >= 2.0:
+                            new_committed.append(seg_text)
+                            advance_samples = max(advance_samples, int(seg.get("end", 0.0) * settings.AUDIO_SAMPLE_RATE))
+                        else:
+                            uncommitted.append(seg_text)
+
+                    if new_committed:
+                        committed_text = f"{committed_text} {' '.join(new_committed)}".strip()
+                        last_committed_sample += advance_samples
+
+                    preview_text = f"{committed_text} {' '.join(uncommitted)}".strip()
+                    if not preview_text and not uncommitted:
+                        preview_text = f"{committed_text} {result.get('text', '').strip()}".strip()
+
+                    if preview_text:
+                        latest_text = preview_text
+                        await _send_json(ws, {
+                            "type": "partial_transcription",
+                            "data": {
+                                "text": latest_text,
+                                "language": detected_lang,
+                                "is_final": False,
+                            },
+                        })
             last_transcribed_time = time.time()
         except Exception as e:
             logger.error("Error in transcribe_current_buffer: %s", e)
@@ -94,6 +125,8 @@ async def websocket_transcribe(ws: WebSocket):
                 webm_buffer.clear()
                 raw_pcm_buffer.clear()
                 latest_text = ""
+                committed_text = ""
+                last_committed_sample = 0
                 detected_lang = ""
                 start_time = time.time()
                 last_transcribed_time = time.time()
@@ -106,6 +139,9 @@ async def websocket_transcribe(ws: WebSocket):
                     recording = True
                     start_time = time.time()
                     last_transcribed_time = time.time()
+                    latest_text = ""
+                    committed_text = ""
+                    last_committed_sample = 0
                     logger.info("Auto-started recording on audio_chunk")
 
                 audio_b64 = msg.get("data", {}).get("audio", "")
@@ -122,9 +158,9 @@ async def websocket_transcribe(ws: WebSocket):
                 else:
                     raw_pcm_buffer.extend(chunk_raw)
 
-                # Incremental transcription: process every ~2.5 seconds
+                # Incremental transcription: process every ~1.5 seconds for snappy preview
                 now = time.time()
-                if now - last_transcribed_time >= 2.5 and not is_transcribing:
+                if now - last_transcribed_time >= 1.5 and not is_transcribing:
                     asyncio.create_task(transcribe_current_buffer())
 
             elif msg_type == "stop_recording":
@@ -142,14 +178,16 @@ async def websocket_transcribe(ws: WebSocket):
                     elif len(raw_pcm_buffer) > 3200:
                         pcm_audio = AudioProcessor.pcm16_to_float32(bytes(raw_pcm_buffer))
 
-                    if pcm_audio is not None and len(pcm_audio) > 1600:
-                        result = await speech_svc.transcribe(pcm_audio, settings.AUDIO_SAMPLE_RATE)
-                        text = result.get("text", "").strip()
-                        if text:
-                            final_text = text
-                        lang = result.get("language")
-                        if lang:
-                            detected_lang = lang
+                    # If final_text wasn't captured or audio is short (< 25s), do a quick cleanup pass
+                    if not final_text or (pcm_audio is not None and len(pcm_audio) < 25 * settings.AUDIO_SAMPLE_RATE):
+                        if pcm_audio is not None and len(pcm_audio) > 1600:
+                            result = await speech_svc.transcribe(pcm_audio, settings.AUDIO_SAMPLE_RATE)
+                            text = result.get("text", "").strip()
+                            if text:
+                                final_text = text
+                            lang = result.get("language")
+                            if lang:
+                                detected_lang = lang
                 except Exception as e:
                     logger.error("Final transcription error: %s", e)
 

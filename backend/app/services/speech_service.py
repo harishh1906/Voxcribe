@@ -154,8 +154,10 @@ class SpeechRecognitionService:
             segments_iter, info = self._model.transcribe(
                 audio,
                 beam_size=_settings.WHISPER_BEAM_SIZE,
+                best_of=1,
                 language=None,  # auto-detect (Hindi, English, Hinglish)
-                vad_filter=False,  # disabled to prevent empty-sequence crash
+                vad_filter=True,  # skips silence to save CPU cycles and speed up
+                vad_parameters=dict(min_silence_duration_ms=400),
                 condition_on_previous_text=False,
                 temperature=0.0,
             )

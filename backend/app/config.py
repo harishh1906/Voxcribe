@@ -7,11 +7,11 @@ class Settings(BaseSettings):
     DATABASE_URL: str = "postgresql://postgres:postgres@db:5432/voxcribe"
 
     # Whisper
-    WHISPER_MODEL: str = "small"
+    WHISPER_MODEL: str = "base"
     WHISPER_DEVICE: str = "cpu"
     WHISPER_COMPUTE_TYPE: str = "int8"
-    WHISPER_BEAM_SIZE: int = 3
-    WHISPER_CPU_THREADS: int = 4
+    WHISPER_BEAM_SIZE: int = 1
+    WHISPER_CPU_THREADS: int = 2
 
     # Audio
     VAD_THRESHOLD: float = 0.5
