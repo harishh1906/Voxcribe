@@ -190,7 +190,7 @@ async def websocket_transcribe(ws: WebSocket):
             elif msg_type == "ping":
                 await _send_json(ws, {"type": "pong", "data": {}})
 
-    except WebSocketDisconnect:
+    except (WebSocketDisconnect, RuntimeError):
         logger.info("WebSocket client disconnected")
     except Exception as e:
         logger.error("WebSocket unhandled exception: %s", e)
