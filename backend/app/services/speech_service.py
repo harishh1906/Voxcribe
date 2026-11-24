@@ -14,7 +14,7 @@ except Exception as e:
 
 
 class SpeechRecognitionService:
-    """Clean, direct Faster-Whisper service for Hinglish and English transcription."""
+    """Minimal Faster-Whisper wrapper — audio in, text out."""
 
     _instance: Optional["SpeechRecognitionService"] = None
     _model: Optional["WhisperModel"] = None
@@ -35,75 +35,49 @@ class SpeechRecognitionService:
         self.model_name = model_name
         self.device = device
         self.compute_type = compute_type
-
         if not _whisper_available:
             return
-
         try:
             from app.config import get_settings
             settings = get_settings()
-            logger.info("Loading speech model: %s on %s (%s)...", model_name, device, compute_type)
+            logger.info("Loading model: %s on %s (%s)...", model_name, device, compute_type)
             SpeechRecognitionService._model = await asyncio.to_thread(
-                WhisperModel,
-                model_name,
-                device=device,
-                compute_type=compute_type,
-                cpu_threads=settings.WHISPER_CPU_THREADS,
+                WhisperModel, model_name, device=device,
+                compute_type=compute_type, cpu_threads=settings.WHISPER_CPU_THREADS,
             )
             self.model_loaded = True
-            logger.info("Speech model '%s' successfully loaded.", model_name)
+            logger.info("Model '%s' loaded.", model_name)
         except Exception as e:
-            logger.error("Failed to load speech model: %s", e)
+            logger.error("Failed to load model: %s", e)
             self.model_loaded = False
 
     async def transcribe(self, audio: np.ndarray, sample_rate: int = 16000) -> Dict[str, Any]:
-        """Directly passes audio to the model."""
         if not self.model_loaded or self._model is None or len(audio) == 0:
-            return {"text": "", "language": None, "language_probability": 0.0, "segments": []}
-
+            return {"text": "", "language": None, "language_probability": 0.0}
         try:
-            return await asyncio.to_thread(self._transcribe_sync, audio)
+            return await asyncio.to_thread(self._run, audio)
         except Exception as e:
             logger.error("Transcription error: %s", e)
-            return {"text": "", "language": None, "language_probability": 0.0, "segments": []}
+            return {"text": "", "language": None, "language_probability": 0.0}
 
-    def _transcribe_sync(self, audio: np.ndarray) -> Dict[str, Any]:
-        try:
-            from app.config import get_settings
-            settings = get_settings()
+    def _run(self, audio: np.ndarray) -> Dict[str, Any]:
+        from app.config import get_settings
+        settings = get_settings()
 
-            segments_iter, info = self._model.transcribe(
-                audio,
-                language=settings.WHISPER_LANGUAGE,
-                beam_size=settings.WHISPER_BEAM_SIZE,
-                temperature=0.0,
-                vad_filter=True,
-            )
+        segments, info = self._model.transcribe(
+            audio,
+            language=settings.WHISPER_LANGUAGE,
+            beam_size=settings.WHISPER_BEAM_SIZE,
+            temperature=0.0,
+            vad_filter=True,
+        )
 
-            text_parts = []
-            seg_list = []
-            for seg in segments_iter:
-                clean_seg = seg.text.strip()
-                if clean_seg:
-                    text_parts.append(clean_seg)
-                    seg_list.append({"start": seg.start, "end": seg.end, "text": clean_seg})
+        text = " ".join(seg.text.strip() for seg in segments if seg.text.strip())
+        lang = getattr(info, "language", None)
+        prob = round(getattr(info, "language_probability", 0.0) or 0.0, 2)
 
-            full_text = " ".join(text_parts).strip()
-            lang = getattr(info, "language", None)
-            prob = getattr(info, "language_probability", 0.0)
-            lang_prob = round(prob, 2) if prob is not None else 0.0
-
-            logger.info("Transcription result: '%s'", full_text)
-
-            return {
-                "text": full_text,
-                "language": lang,
-                "language_probability": lang_prob,
-                "segments": seg_list,
-            }
-        except Exception as e:
-            logger.error("Transcription execution failed: %s", e)
-            return {"text": "", "language": None, "language_probability": 0.0, "segments": []}
+        logger.info("Result: '%s'", text)
+        return {"text": text, "language": lang, "language_probability": prob}
 
     def get_info(self) -> Dict[str, Any]:
         return {
