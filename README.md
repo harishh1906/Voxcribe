@@ -1,33 +1,36 @@
-# Voxcribe – Real-Time Speech to Text
+# Voxcribe – Real-Time Multilingual Speech to Text (Hinglish, Hindi, English)
 
-A modern, production-grade web application for real-time multilingual speech-to-text transcription. Speak naturally into your microphone and see your speech transcribed live with automatic language detection — supporting **English**, **Hindi**, and Hindi-English code-switching (**Hinglish**).
+A modern, high-performance web application for real-time speech-to-text transcription. Speak naturally into your microphone and see your speech transcribed live into fluent **Hinglish**, **Hindi**, and **English** with sub-second latency.
+
+Powered by **Faster-Whisper** and fine-tuned on the **Oriserve Whisper-Hindi2Hinglish** architecture for natural Indian conversational speech.
 
 ---
 
-## Features
+## Key Highlights
 
-- **Real-Time Live Transcription** — Audio streams seamlessly via WebSocket using an incremental sliding window; partial text updates live on your screen.
-- **Multilingual & Code-Switching** — Transcribes English, Hindi (Devanagari), and mixed Hindi-English (Hinglish) with automatic language detection.
-- **Self-Hosted AI Engine** — Powered by [Faster-Whisper](https://github.com/SYSTRAN/faster-whisper) (CTranslate2) with INT8 CPU quantization and GPU support. No paid APIs or third-party cloud audio sharing required.
-- **Anti-Hallucination & Noise Gate** — Built-in silence gating (RMS energy detection) and Whisper repetition filters to prevent hallucinations.
-- **Full History & CRUD Management** — Store, view, search, edit titles/notes, and delete transcriptions backed by a relational database (PostgreSQL or SQLite).
-- **Interactive Analytics Dashboard** — View metrics on total recordings, speech duration, word counts, and language breakdown charts.
-- **Docker & Cloud Ready** — One-command deployment via Docker Compose or 1-click cloud deployment (Hugging Face Spaces, Render, Railway).
+- **Direct Neural Transcription** — Pure end-to-end model inference without fragile heuristic filters or regex bloat.
+- **Dedicated Hinglish Engine** — Powered by `whisper-hindi2hinglish-swift` (CTranslate2 INT8), transcribing conversational Hindi-English code-switching directly into Roman script (*"Aapka naam kya hai"*).
+- **Sub-Second Streaming Latency** — Low-overhead WebSocket audio streaming with VAD (Voice Activity Detection) to skip silence instantly.
+- **Ultra-Lightweight (~78 MB Model)** — Runs effortlessly on free-tier CPUs (Render, Railway, Hugging Face) using only ~120 MB RAM.
+- **Full History & Persistence** — Save, view, search, edit, and export transcriptions backed by PostgreSQL or SQLite.
+- **Interactive Analytics Dashboard** — Visual metrics on total recordings, speech duration, word counts, and language distribution.
+- **Docker & Cloud Ready** — One-command local startup via Docker Compose, or instant cloud deployment.
 
 ---
 
 ## Tech Stack
 
 | Component | Technology | Description |
-|-----------|------------|-------------|
-| **Frontend** | React 18, TypeScript, Vite | Fast, responsive modern SPA |
-| **UI & Styling** | Tailwind CSS, shadcn/ui, Lucide Icons | Clean modern UI with responsive recording interface |
-| **State & API** | TanStack React Query | Cache management and seamless CRUD synchronization |
-| **Backend API** | FastAPI (Python 3.11), WebSockets | Asynchronous high-performance REST and WS server |
-| **Speech AI** | Faster-Whisper, CTranslate2, FFmpeg | Accelerated Whisper inference engine with INT8 / FP16 support |
-| **Database** | PostgreSQL 16 (or SQLite) | Relational persistence with SQLAlchemy & Alembic migrations |
-| **Web Proxy** | Nginx Alpine | Reverse proxy for frontend assets, REST API, and WebSocket streaming |
-| **Orchestration**| Docker & Docker Compose | Containerized multi-service deployment |
+|---|---|---|
+| **Frontend** | React 18, TypeScript, Vite | Fast, responsive Single Page Application (SPA) |
+| **UI & Styling** | Tailwind CSS, shadcn/ui, Lucide Icons | Clean modern recording interface with live waveform visualizer |
+| **State Management**| TanStack React Query | Data caching and real-time CRUD synchronization |
+| **Backend API** | FastAPI (Python 3.11), WebSockets | Asynchronous high-performance REST and WS streaming server |
+| **Speech AI** | Faster-Whisper, CTranslate2, FFmpeg | Accelerated Whisper engine with INT8 quantization |
+| **Model** | `whisper-hindi2hinglish-swift-ct2` | 78 MB INT8 model optimized for Indian accents & Hinglish |
+| **Database** | PostgreSQL 16 (or SQLite) | Relational persistence with SQLAlchemy ORM |
+| **Proxy / Server** | Nginx Alpine / Uvicorn | Reverse proxy for assets and WebSocket streaming |
+| **Containerization**| Docker & Docker Compose | Multi-container setup for seamless local & cloud deployment |
 
 ---
 
@@ -41,29 +44,23 @@ A modern, production-grade web application for real-time multilingual speech-to-
                                  │ WebSocket Stream (Base64)
                                  ▼
                   ┌─────────────────────────────────────────┐
-                  │              Nginx Proxy                │
-                  │    Port 3000 (HTTP) & /ws/ (WebSockets) │
-                  └──────────────┬──────────────────────────┘
-                                 │
-                                 ▼
-                  ┌─────────────────────────────────────────┐
-                  │           FastAPI Backend               │
+                  │              FastAPI Backend            │
                   │  1. AudioProcessor (FFmpeg WebM ➔ PCM)   │
-                  │  2. Noise Gate & Sliding Window         │
-                  │  3. Faster-Whisper (INT8 / GPU)         │
+                  │  2. Faster-Whisper (INT8 CTranslate2)   │
+                  │  3. Real-Time Text Streaming            │
                   └──────────────┬──────────────────────────┘
                                  │
                          ┌───────┴────────┐
                          ▼                ▼
                   ┌──────────────┐ ┌──────────────┐
-                  │  PostgreSQL  │ │ Whisper Cache│
-                  │  Database    │ │ Model Cache  │
+                  │  PostgreSQL  │ │ Whisper-     │
+                  │  Database    │ │ Hinglish     │
                   └──────────────┘ └──────────────┘
 ```
 
 ---
 
-## Quick Start (Local Deployment)
+## Quick Start (Local Setup)
 
 ### Prerequisites
 - [Docker](https://www.docker.com/) and [Docker Desktop](https://www.docker.com/products/docker-desktop/) installed and running.
@@ -86,170 +83,79 @@ docker compose up -d --build
 ```
 
 Access the application:
-- **Frontend Web App:** [http://localhost:3000](http://localhost:3000)
+- **Frontend App:** [http://localhost:3000](http://localhost:3000)
 - **Backend API Docs:** [http://localhost:8000/docs](http://localhost:8000/docs)
-- **Health & Model Status:** [http://localhost:8000/api/health](http://localhost:8000/api/health)
-
-To view backend logs:
-```bash
-docker compose logs -f backend
-```
-
-To stop all containers:
-```bash
-docker compose down
-```
+- **Health Check:** [http://localhost:8000/api/health](http://localhost:8000/api/health)
 
 ---
 
-## Cloud Deployment Guide (Free Tiers)
+## Cloud Deployment (Render.com)
 
-Voxcribe is designed to deploy easily to free cloud platforms.
+Voxcribe is optimized to run smoothly on the Render Free Tier (512 MB RAM):
 
-### Option 1: Hugging Face Spaces (Recommended — 100% Free with 16 GB RAM)
-Hugging Face Spaces offers a completely free tier with **2 vCPUs and 16 GB RAM**, which handles Faster-Whisper `small` effortlessly.
+### 1. Database (PostgreSQL)
+* Create a free PostgreSQL instance on Render.
+* Copy the **External Database URL**.
 
-1. Go to [Hugging Face Spaces](https://huggingface.co/spaces) and click **Create new Space**.
-2. Select **Docker** as the Space SDK (Blank).
-3. Connect your GitHub repository `harishh1906/Voxcribe` or push the code directly.
-4. Under **Settings > Variables and secrets**, add:
-   ```env
-   WHISPER_MODEL=small
-   WHISPER_DEVICE=cpu
-   WHISPER_COMPUTE_TYPE=int8
-   WHISPER_BEAM_SIZE=3
-   WHISPER_CPU_THREADS=2
-   DATABASE_URL=sqlite:///./voxcribe.db
-   ```
-5. Hugging Face will automatically build and launch your application!
+### 2. Backend (Web Service)
+* Build from Docker: `Dockerfile` in the root or `backend/Dockerfile`.
+* Set Environment Variables:
+  ```env
+  DATABASE_URL=postgresql://user:password@host/voxcribe
+  WHISPER_MODEL=MSpider3/whisper-hindi2hinglish-swift-ct2
+  WHISPER_LANGUAGE=en
+  WHISPER_DEVICE=cpu
+  WHISPER_COMPUTE_TYPE=int8
+  WHISPER_BEAM_SIZE=1
+  WHISPER_CPU_THREADS=2
+  ```
 
----
-
-### Option 2: Render.com / Railway + Free Neon Postgres
-1. Create a free serverless PostgreSQL database on [Neon.tech](https://neon.tech). Copy the connection string.
-2. Deploy the backend as a Docker Web Service on **Railway** or **Render**.
-3. Set the environment variables:
-   ```env
-   DATABASE_URL=postgresql://user:password@ep-xyz.neon.tech/voxcribe?sslmode=require
-   WHISPER_MODEL=base
-   WHISPER_DEVICE=cpu
-   WHISPER_COMPUTE_TYPE=int8
-   WHISPER_BEAM_SIZE=1
-   WHISPER_CPU_THREADS=2
-   ```
+### 3. Frontend (Static Site)
+* Root Directory: `frontend`
+* Build Command: `npm install && npm run build`
+* Publish Directory: `dist`
+* Environment Variables:
+  ```env
+  VITE_BACKEND_URL=https://<your-backend>.onrender.com
+  ```
+* Redirect & Rewrite Rules:
+  * Source: `/*`
+  * Destination: `/index.html`
+  * Action: `Rewrite`
 
 ---
 
-## Hardware Tuning & Model Selection Guide
-
-Whisper model performance depends on your compute hardware:
-
-| Model | Size | Speed (CPU) | Speed (NVIDIA GPU) | Multilingual & Hindi Accuracy | Recommended Hardware |
-|---|---|---|---|---|---|
-| **`tiny`** | ~75 MB | ⚡ Ultra Fast (>8x) | Instant | Low (drops mixed words) | Low-spec devices / quick tests |
-| **`base`** | ~145 MB | ⚡ Fast (3x-5x) | Instant | Moderate (good for clear speech) | Standard laptops (i3 / i5) |
-| **`small`** | ~466 MB | ⏱ Balanced (1x-2x) | 🚀 15x real-time | **High (best for Hindi & Hinglish)** | Multi-core desktop or GPU |
-| **`medium`**| ~1.5 GB | 🐢 Slow (<0.5x) | 🚀 8x real-time | Excellent | NVIDIA GPU (>= 6GB VRAM) |
-| **`large-v3`**| ~3.1 GB | 🛑 Unusable on CPU | 🚀 4x real-time | State of the art | NVIDIA GPU (>= 8GB VRAM) |
-
-### Recommended Profiles in `.env`:
-
-#### For Laptops & Low-Core CPUs (Speed Priority)
-```env
-WHISPER_MODEL=base
-WHISPER_DEVICE=cpu
-WHISPER_COMPUTE_TYPE=int8
-WHISPER_BEAM_SIZE=1
-WHISPER_CPU_THREADS=4
-```
-
-#### For High-Performance CPUs or balanced accuracy (Accuracy Priority)
-```env
-WHISPER_MODEL=small
-WHISPER_DEVICE=cpu
-WHISPER_COMPUTE_TYPE=int8
-WHISPER_BEAM_SIZE=3
-WHISPER_CPU_THREADS=4
-```
-
-#### For NVIDIA GPU Machines (CUDA)
-```env
-WHISPER_MODEL=small
-WHISPER_DEVICE=cuda
-WHISPER_COMPUTE_TYPE=float16
-WHISPER_BEAM_SIZE=5
-```
-
----
-
-## Environment Variables Reference
+## Configuration Reference
 
 | Variable | Default | Description |
 |---|---|---|
 | `DATABASE_URL` | `postgresql://postgres:postgres@db:5432/voxcribe` | PostgreSQL or SQLite connection string |
-| `WHISPER_MODEL` | `small` | Faster-Whisper model (`tiny`, `base`, `small`, `medium`, `large-v3`) |
+| `WHISPER_MODEL` | `MSpider3/whisper-hindi2hinglish-swift-ct2` | Model repo name or Whisper size (`base`, `small`) |
+| `WHISPER_LANGUAGE` | `en` | Target script (`en` outputs Latin/Roman Hinglish) |
 | `WHISPER_DEVICE` | `cpu` | Processing device (`cpu` or `cuda`) |
-| `WHISPER_COMPUTE_TYPE` | `int8` | Weight precision (`int8` for CPU, `float16` for GPU) |
-| `WHISPER_BEAM_SIZE` | `3` | Decoding beam size (`1` for greedy/fastest, `3-5` for accuracy) |
-| `WHISPER_CPU_THREADS` | `4` | Number of physical CPU threads allocated to CTranslate2 |
-| `AUDIO_SAMPLE_RATE` | `16000` | Target sample rate for Whisper inference (16 kHz) |
-| `CORS_ORIGINS` | `["http://localhost:5173","http://localhost:3000"]` | Allowed CORS origins for REST and WebSockets |
-| `LOG_LEVEL` | `INFO` | Logging verbosity (`DEBUG`, `INFO`, `WARNING`, `ERROR`) |
+| `WHISPER_COMPUTE_TYPE` | `int8` | Quantization precision (`int8` for fast CPU) |
+| `WHISPER_BEAM_SIZE` | `1` | Beam size (`1` for greedy/fastest real-time decoding) |
+| `WHISPER_CPU_THREADS` | `2` | Number of physical CPU threads allocated |
+| `AUDIO_SAMPLE_RATE` | `16000` | Target audio sample rate (16 kHz) |
 
 ---
 
-## API & WebSocket Specification
+## WebSocket Protocol (`/ws/transcribe`)
 
-### REST Endpoints
+### Client Messages:
+* `{"type": "start_recording"}` — Initializes recording session.
+* `{"type": "audio_chunk", "data": {"audio": "<base64_webm>"}}` — Streams audio chunks.
+* `{"type": "pause_recording"}` / `{"type": "resume_recording"}` — Temporarily pauses/resumes.
+* `{"type": "stop_recording"}` — Stops recording and persists transcription to database.
+* `{"type": "ping"}` — Heartbeat ping.
 
-| Method | Endpoint | Description |
-|---|---|---|
-| `GET` | `/api/health` | Health check + current model load state |
-| `GET` | `/api/transcriptions/` | List transcriptions (paginated, with search & filtering) |
-| `POST` | `/api/transcriptions/` | Create a transcription entry |
-| `GET` | `/api/transcriptions/{id}` | Get transcription details by UUID |
-| `PUT` | `/api/transcriptions/{id}` | Update title or notes |
-| `DELETE`| `/api/transcriptions/{id}` | Delete a transcription entry |
-| `GET` | `/api/transcriptions/stats/dashboard` | Aggregated dashboard analytics |
-
-### WebSocket Protocol (`/ws/transcribe`)
-
-#### Client Message Types:
-- `{"type": "start_recording"}` — Initializes a new session.
-- `{"type": "audio_chunk", "data": {"audio": "<base64_webm>"}}` — Streams audio chunks.
-- `{"type": "pause_recording"}` / `{"type": "resume_recording"}` — Temporarily pauses/resumes capture.
-- `{"type": "stop_recording"}` — Triggers the final consolidation pass and database persistence.
-- `{"type": "ping"}` — Keep-alive heartbeat (`{"type": "pong"}`).
-
-#### Server Message Types:
-- `{"type": "recording_started", "data": {}}`
-- `{"type": "partial_transcription", "data": {"text": "...", "language": "hi", "is_final": false}}`
-- `{"type": "final_transcription", "data": {"id": "<uuid>", "text": "...", "duration": 14.2, "language": "hi", "word_count": 28}}`
-- `{"type": "error", "data": {"message": "..."}}`
-
----
-
-## Running Automated Tests
-
-Backend unit and integration tests use SQLite in-process:
-
-```bash
-cd backend
-python -m venv venv
-venv\Scripts\activate   # On Windows
-# source venv/bin/activate # On Linux/macOS
-
-pip install -r requirements.txt
-pytest tests/ -v
-```
-
-All 14 core tests verify:
-- REST CRUD operations & pagination
-- Audio format detection & PCM conversion
-- Model loading fallbacks and silence thresholding
+### Server Messages:
+* `{"type": "recording_started", "data": {}}`
+* `{"type": "partial_transcription", "data": {"text": "...", "language": "Hinglish", "is_final": false}}`
+* `{"type": "final_transcription", "data": {"id": "<uuid>", "text": "...", "duration": 12.4, "word_count": 24}}`
 
 ---
 
 ## License
 
-This project is licensed under the MIT License.
+This project is open-source and available under the [MIT License](LICENSE).

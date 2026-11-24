@@ -1,6 +1,5 @@
 import asyncio
 import logging
-import re
 import numpy as np
 from typing import Dict, Any, Optional
 
@@ -11,83 +10,14 @@ try:
     from faster_whisper import WhisperModel
     _whisper_available = True
 except Exception as e:
-    logger.warning("faster-whisper not available: %s. Transcription will be disabled.", e)
-
-
-# --- Anti-hallucination helpers ---
-
-def _is_repetitive(text: str, threshold: int = 4) -> bool:
-    """Detect if text is mostly a single word/phrase repeated many times."""
-    if not text:
-        return False
-    words = text.split()
-    if len(words) < threshold:
-        return False
-    # Check if any single token makes up > 60% of the words
-    from collections import Counter
-    counts = Counter(words)
-    most_common_word, most_common_count = counts.most_common(1)[0]
-    if most_common_count / len(words) > 0.6:
-        logger.debug("Repetitive text detected: '%s' repeated %d/%d times", most_common_word, most_common_count, len(words))
-        return True
-    # Check for repeating bigrams
-    if len(words) >= 6:
-        bigrams = [words[i] + " " + words[i + 1] for i in range(len(words) - 1)]
-        bg_counts = Counter(bigrams)
-        top_bg, top_bg_count = bg_counts.most_common(1)[0]
-        if top_bg_count / len(bigrams) > 0.5:
-            logger.debug("Repetitive bigram detected: '%s' repeated %d times", top_bg, top_bg_count)
-            return True
-    return False
-
-
-def _is_hallucination(text: str) -> bool:
-    """Detect common Whisper hallucination patterns."""
-    if not text:
-        return False
-    stripped = text.strip()
-    # All ellipsis / dots / dashes
-    if re.fullmatch(r'[.\s…\-–—]+', stripped):
-        return True
-    # Very short garbage (single punctuation, single foreign char, etc.)
-    if len(stripped) <= 2 and not stripped.isalnum():
-        return True
-    # Common Whisper hallucination phrases when audio is quiet / noisy
-    hallucination_phrases = [
-        "thank you for watching",
-        "thanks for watching",
-        "please subscribe",
-        "like and subscribe",
-        "subtitles by",
-        "translated by",
-        "amara.org",
-        "we'll be right back",
-        "be right back",
-        "i'm going to be ready",
-        "what is happening over here",
-        "is that clear clear",
-        "i'm sorry",
-    ]
-    lower = stripped.lower()
-    for phrase in hallucination_phrases:
-        if phrase in lower:
-            return True
-    return False
-
-
-def _clean_text(text: str) -> str:
-    """Remove leading/trailing noise characters from transcribed text."""
-    # Strip leading/trailing ellipsis, dots, dashes, spaces
-    cleaned = re.sub(r'^[.\s…\-–—,;:]+', '', text)
-    cleaned = re.sub(r'[.\s…\-–—,;:]+$', '', cleaned)
-    return cleaned.strip()
+    logger.warning("faster-whisper not available: %s", e)
 
 
 class SpeechRecognitionService:
-    """Singleton service wrapping Faster-Whisper for real-time transcription."""
+    """Clean, direct Faster-Whisper service for Hinglish and English transcription."""
 
     _instance: Optional["SpeechRecognitionService"] = None
-    _model = None
+    _model: Optional["WhisperModel"] = None
 
     def __init__(self):
         self.model_loaded = False
@@ -102,106 +32,68 @@ class SpeechRecognitionService:
         return cls._instance
 
     async def load_model(self, model_name: str, device: str = "cpu", compute_type: str = "int8"):
-        """Load Faster-Whisper model in a background thread."""
         self.model_name = model_name
         self.device = device
         self.compute_type = compute_type
 
         if not _whisper_available:
-            logger.warning("Whisper not available — skipping model load.")
             return
 
         try:
-            await asyncio.to_thread(self._load_sync, model_name, device, compute_type)
+            from app.config import get_settings
+            settings = get_settings()
+            logger.info("Loading speech model: %s on %s (%s)...", model_name, device, compute_type)
+            SpeechRecognitionService._model = await asyncio.to_thread(
+                WhisperModel,
+                model_name,
+                device=device,
+                compute_type=compute_type,
+                cpu_threads=settings.WHISPER_CPU_THREADS,
+            )
             self.model_loaded = True
-            logger.info("Whisper model '%s' loaded on %s (%s)", model_name, device, compute_type)
+            logger.info("Speech model '%s' successfully loaded.", model_name)
         except Exception as e:
-            logger.error("Failed to load Whisper model: %s", e)
+            logger.error("Failed to load speech model: %s", e)
             self.model_loaded = False
 
-    def _load_sync(self, model_name: str, device: str, compute_type: str):
-        from app.config import get_settings
-        _settings = get_settings()
-        SpeechRecognitionService._model = WhisperModel(
-            model_name, device=device, compute_type=compute_type,
-            cpu_threads=_settings.WHISPER_CPU_THREADS,
-        )
-
     async def transcribe(self, audio: np.ndarray, sample_rate: int = 16000) -> Dict[str, Any]:
-        """Transcribe a float32 numpy audio array."""
-        if not self.model_loaded or self._model is None:
-            return {
-                "text": "",
-                "language": None,
-                "segments": [],
-                "error": "Model not loaded",
-            }
+        """Directly passes audio to the model."""
+        if not self.model_loaded or self._model is None or len(audio) == 0:
+            return {"text": "", "language": None, "language_probability": 0.0, "segments": []}
+
         try:
-            return await asyncio.to_thread(self._transcribe_sync, audio, sample_rate)
+            return await asyncio.to_thread(self._transcribe_sync, audio)
         except Exception as e:
             logger.error("Transcription error: %s", e)
-            return {"text": "", "language": None, "segments": [], "error": str(e)}
-
-    def _transcribe_sync(self, audio: np.ndarray, sample_rate: int) -> Dict[str, Any]:
-        if len(audio) == 0:
             return {"text": "", "language": None, "language_probability": 0.0, "segments": []}
 
-        rms = float(np.sqrt(np.mean(audio ** 2)))
-        logger.info("Transcribe called: samples=%d (%.2fs), rms=%.5f", len(audio), len(audio) / sample_rate, rms)
-
-        # 0.0015 threshold allows normal spoken volume while gating absolute silence
-        if rms < 0.0015:
-            logger.info("Audio below silence threshold (rms=%.5f < 0.0015), skipping", rms)
-            return {"text": "", "language": None, "language_probability": 0.0, "segments": []}
-
+    def _transcribe_sync(self, audio: np.ndarray) -> Dict[str, Any]:
         try:
             from app.config import get_settings
-            _settings = get_settings()
+            settings = get_settings()
+
             segments_iter, info = self._model.transcribe(
                 audio,
-                beam_size=_settings.WHISPER_BEAM_SIZE,
-                best_of=1,
-                language=None,  # auto-detect (Hindi, English, Hinglish)
-                initial_prompt="नमस्ते, आपका नाम क्या है? Hello, what is your name? Aapka naam kya hai? English, Hindi, and Hinglish speech.",
-                vad_filter=True,  # skips silence to save CPU cycles and speed up
-                vad_parameters=dict(min_silence_duration_ms=400),
-                no_speech_threshold=0.55,
-                compression_ratio_threshold=2.2,
-                condition_on_previous_text=False,
+                language=settings.WHISPER_LANGUAGE,
+                beam_size=settings.WHISPER_BEAM_SIZE,
                 temperature=0.0,
+                vad_filter=True,
             )
-
-            lang = getattr(info, "language", None)
-            prob = getattr(info, "language_probability", 0.0)
-            lang_prob = round(prob, 2) if prob is not None else 0.0
-
-            if lang_prob < 0.4:
-                logger.info("Language confidence too low (%.2f < 0.4), ignoring hallucinated text", lang_prob)
-                return {"text": "", "language": None, "language_probability": 0.0, "segments": []}
 
             text_parts = []
             seg_list = []
             for seg in segments_iter:
-                seg_text = seg.text.strip()
-                if getattr(seg, "no_speech_prob", 0.0) > 0.55:
-                    continue
-                if getattr(seg, "avg_logprob", 0.0) < -1.1:
-                    continue
-                if _is_hallucination(seg_text) or _is_repetitive(seg_text):
-                    continue
-                text_parts.append(seg.text)
-                seg_list.append({"start": seg.start, "end": seg.end, "text": seg.text})
+                clean_seg = seg.text.strip()
+                if clean_seg:
+                    text_parts.append(clean_seg)
+                    seg_list.append({"start": seg.start, "end": seg.end, "text": clean_seg})
 
-            full_text = "".join(text_parts).strip()
-            full_text = _clean_text(full_text)
-            if _is_hallucination(full_text) or _is_repetitive(full_text):
-                full_text = ""
-
+            full_text = " ".join(text_parts).strip()
             lang = getattr(info, "language", None)
             prob = getattr(info, "language_probability", 0.0)
             lang_prob = round(prob, 2) if prob is not None else 0.0
 
-            logger.info("Transcription result: text='%s', lang=%s (%.2f)", full_text, lang, lang_prob)
+            logger.info("Transcription result: '%s'", full_text)
 
             return {
                 "text": full_text,
@@ -209,10 +101,9 @@ class SpeechRecognitionService:
                 "language_probability": lang_prob,
                 "segments": seg_list,
             }
-        except ValueError as e:
-            if "empty sequence" in str(e):
-                return {"text": "", "language": None, "language_probability": 0.0, "segments": []}
-            raise
+        except Exception as e:
+            logger.error("Transcription execution failed: %s", e)
+            return {"text": "", "language": None, "language_probability": 0.0, "segments": []}
 
     def get_info(self) -> Dict[str, Any]:
         return {

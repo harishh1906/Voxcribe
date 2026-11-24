@@ -58,7 +58,7 @@ export default function HistoryPage() {
                   <p className="text-sm text-muted-foreground mt-1 line-clamp-2">
                     {t.transcription_text || "No text"}
                   </p>
-                  <div className="flex items-center gap-3 mt-2 text-xs text-muted-foreground">
+                  <div className="flex items-center gap-2 sm:gap-3 flex-wrap mt-2 text-xs text-muted-foreground">
                     <span className="flex items-center gap-1"><Clock className="h-3 w-3" />{formatDuration(t.duration_seconds)}</span>
                     <span>{t.word_count} words</span>
                     {t.language_detected && <Badge variant="outline" className="text-xs">{t.language_detected}</Badge>}

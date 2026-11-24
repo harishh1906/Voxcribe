@@ -1,17 +1,19 @@
 from pydantic_settings import BaseSettings
 from functools import lru_cache
-from typing import List
+from typing import List, Optional
 
 
 class Settings(BaseSettings):
     DATABASE_URL: str = "postgresql://postgres:postgres@db:5432/voxcribe"
 
     # Whisper
-    WHISPER_MODEL: str = "base"
+    WHISPER_MODEL: str = "MSpider3/whisper-hindi2hinglish-swift-ct2"
     WHISPER_DEVICE: str = "cpu"
     WHISPER_COMPUTE_TYPE: str = "int8"
     WHISPER_BEAM_SIZE: int = 1
     WHISPER_CPU_THREADS: int = 2
+    WHISPER_LANGUAGE: Optional[str] = "en"
+    WHISPER_INITIAL_PROMPT: Optional[str] = None
 
     # Audio
     VAD_THRESHOLD: float = 0.5
