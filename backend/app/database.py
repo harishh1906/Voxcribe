@@ -16,6 +16,9 @@ def _get_engine():
     global _engine
     if _engine is None:
         url = get_settings().DATABASE_URL
+        # Cloud providers like Render/Heroku often provide URLs starting with postgres://
+        if url.startswith("postgres://"):
+            url = url.replace("postgres://", "postgresql://", 1)
         kwargs = {"pool_pre_ping": True}
         if url.startswith("sqlite"):
             kwargs = {"connect_args": {"check_same_thread": False}}
