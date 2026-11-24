@@ -52,7 +52,7 @@ def _is_hallucination(text: str) -> bool:
     # Very short garbage (single punctuation, single foreign char, etc.)
     if len(stripped) <= 2 and not stripped.isalnum():
         return True
-    # Common Whisper hallucination phrases
+    # Common Whisper hallucination phrases when audio is quiet / noisy
     hallucination_phrases = [
         "thank you for watching",
         "thanks for watching",
@@ -61,6 +61,12 @@ def _is_hallucination(text: str) -> bool:
         "subtitles by",
         "translated by",
         "amara.org",
+        "we'll be right back",
+        "be right back",
+        "i'm going to be ready",
+        "what is happening over here",
+        "is that clear clear",
+        "i'm sorry",
     ]
     lower = stripped.lower()
     for phrase in hallucination_phrases:
@@ -156,24 +162,39 @@ class SpeechRecognitionService:
                 beam_size=_settings.WHISPER_BEAM_SIZE,
                 best_of=1,
                 language=None,  # auto-detect (Hindi, English, Hinglish)
+                initial_prompt="नमस्ते, आपका नाम क्या है? Hello, what is your name? Aapka naam kya hai? English, Hindi, and Hinglish speech.",
                 vad_filter=True,  # skips silence to save CPU cycles and speed up
                 vad_parameters=dict(min_silence_duration_ms=400),
+                no_speech_threshold=0.55,
+                compression_ratio_threshold=2.2,
                 condition_on_previous_text=False,
                 temperature=0.0,
             )
+
+            lang = getattr(info, "language", None)
+            prob = getattr(info, "language_probability", 0.0)
+            lang_prob = round(prob, 2) if prob is not None else 0.0
+
+            if lang_prob < 0.4:
+                logger.info("Language confidence too low (%.2f < 0.4), ignoring hallucinated text", lang_prob)
+                return {"text": "", "language": None, "language_probability": 0.0, "segments": []}
 
             text_parts = []
             seg_list = []
             for seg in segments_iter:
                 seg_text = seg.text.strip()
-                if _is_hallucination(seg_text):
+                if getattr(seg, "no_speech_prob", 0.0) > 0.55:
+                    continue
+                if getattr(seg, "avg_logprob", 0.0) < -1.1:
+                    continue
+                if _is_hallucination(seg_text) or _is_repetitive(seg_text):
                     continue
                 text_parts.append(seg.text)
                 seg_list.append({"start": seg.start, "end": seg.end, "text": seg.text})
 
             full_text = "".join(text_parts).strip()
             full_text = _clean_text(full_text)
-            if _is_hallucination(full_text):
+            if _is_hallucination(full_text) or _is_repetitive(full_text):
                 full_text = ""
 
             lang = getattr(info, "language", None)
