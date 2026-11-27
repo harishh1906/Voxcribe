@@ -159,3 +159,29 @@ Voxcribe is optimized to run smoothly on the Render Free Tier (512 MB RAM):
 ## License
 
 This project is open-source and available under the [MIT License](LICENSE).
+
+
+## Troubleshooting & Runtime Checks
+
+Use this checklist when local or deployed transcription does not behave as expected. Confirm the browser, frontend configuration, backend logs, and environment variables before changing model settings.
+
+| Symptom | Checks |
+|---|---|
+| Microphone cannot start | Grant microphone permission to the site, confirm the input device is available, and reload the page. |
+| WebSocket does not connect | Confirm the frontend `VITE_BACKEND_URL` points to the deployed backend, the backend is reachable, and the browser is using the correct HTTP/HTTPS origin. |
+| Audio conversion fails or times out | Verify FFmpeg is installed in the backend runtime and inspect backend logs for conversion errors. |
+| Recording ends without a saved result | Confirm the client sends `stop_recording`, then check the backend and database logs for persistence errors. |
+| Output script is unexpected | Review `WHISPER_MODEL` and `WHISPER_LANGUAGE`; this project documents `en` as the setting for Latin/Roman Hinglish output. |
+| Silence or very short speech produces no useful text | Test with a clear, sufficiently long sample and inspect audio/VAD handling before changing inference parameters. |
+| Connection closes during recording | Check browser network logs and backend WebSocket logs; verify the client handles reconnects and clean disconnects. |
+
+### Suggested end-to-end smoke test
+
+1. Open the frontend and allow microphone access.
+2. Start a recording and confirm the server emits `recording_started`.
+3. Speak a short Hindi-English sentence and confirm one or more `partial_transcription` messages arrive.
+4. Stop recording and confirm a `final_transcription` response includes an ID, text, duration, and word count.
+5. Open transcription history and verify the saved record can be retrieved.
+6. Repeat with a short English-only sample to compare language behavior.
+
+For deployed environments, verify `VITE_BACKEND_URL`, `DATABASE_URL`, the backend health endpoint, and the frontend rewrite rule described above. Avoid committing production credentials or database URLs to the repository.
